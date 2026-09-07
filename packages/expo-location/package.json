@@ -26,6 +26,28 @@
   "sideEffects": false,
   "main": "build/index.js",
   "types": "build/index.d.ts",
+  "exports": {
+    "./app.plugin": "./app.plugin.js",
+    "./app.plugin.js": "./app.plugin.js",
+    "./package.json": "./package.json",
+    "./plugin": "./plugin/build/index.js",
+    ".": {
+      "types": {
+        "expo-source": "./src/index.ts",
+        "default": "./build/index.d.ts"
+      },
+      "expo-source": "./src/index.ts",
+      "default": "./build/index.js"
+    },
+    "./next": {
+      "types": {
+        "expo-source": "./src/next/index.ts",
+        "default": "./build/next/index.d.ts"
+      },
+      "expo-source": "./src/next/index.ts",
+      "default": "./build/next/index.js"
+    }
+  },
   "scripts": {
     "build": "pnpm run build:lib && pnpm run build:plugin",
     "build:lib": "expo-build src",
@@ -39,16 +61,19 @@
     "typecheck": "tsc -b tsconfig.all.json"
   },
   "dependencies": {
-    "@expo/image-utils": "workspace:^"
+    "@expo/image-utils": "workspace:^",
+    "expo-task-manager": "workspace:~"
   },
   "devDependencies": {
     "@types/jest": "^29.2.1",
     "@types/node": "^22.14.0",
+    "@types/react": "~19.2.0",
     "expo": "workspace:*",
     "expo-module-scripts": "workspace:*"
   },
   "peerDependencies": {
-    "expo": "*"
+    "expo": "*",
+    "react": "*"
   },
   "jest": {
     "preset": "expo-module-scripts"
