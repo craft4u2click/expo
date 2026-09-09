@@ -1,46 +1,659 @@
----
-title: Introduction to development builds
-sidebar_title: Introduction and setup
-description: Learn how to create a development build in your Expo project and why use a development build instead of Expo Go.
-searchRank: 98
-searchPosition: 1
-hideTOC: true
-hasVideoLink: true
----
+{
+  "name": "soulpad",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "android": "react-native run-android",
+    "ios": "react-native run-ios",
+    "start": "react-native start"
+  },
+  "dependencies": {
+    "@react-native-async-storage/async-storage": "^1.23.1",
+    "@superwall/react-native-superwall": "^2.1.0",
+    "react": "18.3.1",
+    "react-native": "0.75.2",
+    "react-native-linear-gradient": "^2.8.3",
+    "react-native-purchases": "^8.2.0",
+    "react-native-reanimated": "^3.15.0",
+    "react-native-safe-area-context": "^4.10.8"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.25.2",
+    "@types/react": "^18.3.3",
+    "typescript": "^5.5.4"
+  }
+}
+}
 
-import { BuildMethodForm } from '~/scenes/develop/development-builds/BuildMethodForm';
-import { DevelopmentBuildInstructions } from '~/scenes/develop/development-builds/DevelopmentBuildInstructions';
-import { RelatedSkills } from '~/ui/components/RelatedSkills';
-import { VideoBoxLink } from '~/ui/components/VideoBoxLink';
+export interface Question {
+  question_id: string;
+  category: string;
+  difficulty_level: number;
+  story_context?: string;
+  prompt: string;
+  options: QuestionOption[];
+  correct_option_id: string;
+  scripture_proof: string;
+  reasoning_explanation: string;
+  lifeline_data: {
+    scriptural_hint: string;
+    fifty_fifty_remove: string[];
+  };
+}
 
-When you create a new Expo app with [`create-expo-app`](/get-started/create-a-project/), you start with a project where you update TypeScript/JavaScript code on your local machine and view the changes in the Expo Go app. A **development build** is essentially **your own version of Expo Go** where you are free to use any native libraries and change any native configuration.
+export interface UserProfile {
+  id: string;
+  email: string;
+  name: string;
+  referralCreatorId?: string; // Track UGC creator via SideShift
+  isPro: boolean;
+  streakCount: number;
+  pearlsBalance: number;
+}
+import { UserProfile } from '../types/game';
 
-A **development build is recommended when you want to create your own app and release to app stores**. It includes the [`expo-dev-client`](/versions/latest/sdk/dev-client/) library, which augments the built-in React Native development tooling. The tooling also includes support for inspecting network requests and a ["launcher" UI](/develop/development-builds/use-development-builds/#the-launcher-screen) that lets you switch between different development servers (such as between a server running on your machine or a teammate's machine) and deployments of your app (such as published updates with [EAS Update](/eas-update/introduction/)).
+class AnalyticsAndCRMService {
+  private attioApiKey = 'ATTIO_API_KEY_LIVE';
+  private baseUrl = 'https://api.attio.com/v2';
 
-<VideoBoxLink
-  videoId="FdjczjkwQKE"
-  title="Expo Go & Development Builds: which should you use?"
-  description="In this tutorial video, Beto explains what each of them is and when to choose a development build."
-/>
+  /**
+   * Syncs user gameplay traits & milestone conversions to Attio CRM
+   */
+  async syncUserToAttio(user: UserProfile, eventName: string, eventData?: Record<string, any>): Promise<void> {
+    try {
+      // 1. Assert user record in Attio
+      await fetch(`${this.baseUrl}/objects/people/records`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${this.attioApiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          data: {
+            values: {
+              email_addresses: [{ email_address: user.email }],
+              name: [{ full_name: user.name }],
+              custom_attributes: {
+                streak_count: user.streakCount,
+                is_pro_member: user.isPro,
+                pearl_balance: user.pearlsBalance,
+                last_event: eventName,
+                last_event_meta: JSON.stringify(eventData || {}),
+              },
+            },
+          },
+        }),
+      });
+      console.log(`[Attio CRM] Synced event: ${eventName} for ${user.email}`);
+    } catch (err) {
+      console.error('[Attio CRM Error]', err);
+    }
+  }
+}
+class UGCCreatorService {
+  private sideshiftApiKey = 'SK_LIVE_SIDESHIFT_API_KEY';
+  private baseUrl = 'https://app.sideshift.app/api/embed';
 
-## How would you like to build your development build?
+  /**
+   * Registers a UGC Creator inside SideShift for performance payouts
+   */
+  async registerUGCCreator(name: string, email: string, externalId: string): Promise<string | null> {
+    try {
+      const response = await fetch(`${this.baseUrl}/accounts/create`, {
+        method: 'POST',
+        headers: {
+          'x-api-key': this.sideshiftApiKey,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email, name, externalId }),
+      });
+      const data = await response.json();
+      return data.sideshiftAccountId; // Save this ID to track attribution
+    } catch (error) {
+      console.error('[SideShift API Error]', error);
+      return null;
+    }
+  }
 
-All three methods produce the same development build. They differ in where the app compiles and what you need to have installed on your machine.
+  /**
+   * Triggers automated revenue share payout to creator when a referred user subscribes
+   */
+  async processCreatorCommission(sideshiftAccountId: string, amountUsd: number): Promise<boolean> {
+    try {
+      const response = await fetch(`${this.baseUrl}/transfers/create`, {
+        method: 'POST',
+        headers: {
+          'x-api-key': this.sideshiftApiKey,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          sideshiftAccountId,
+          amount: amountUsd * 0.20, // 20% Revenue Share to UGC Creator
+          currency: 'USD',
+          description: 'Soulpad UGC Creator Referral Commission',
+        }),
+      });
+      return response.ok;
+    } catch (error) {
+      console.error('[SideShift Transfer Error]', error);
+      return false;
+    }
+  }
+}import Purchases, { LOG_LEVEL } from 'react-native-purchases';
+import Superwall from '@superwall/react-native-superwall';
 
-<BuildMethodForm />
+export class MonetizationService {
+  static async initialize(userId: string): Promise<void> {
+    try {
+      // 1. RevenueCat Configuration
+      Purchases.setLogLevel(LOG_LEVEL.DEBUG);
+      Purchases.configure({
+        apiKey: 'goog_revenuecat_api_key', // Replace with iOS/Android keys
+        appUserID: userId,
+      });
 
----
+      // 2. Superwall Configuration
+      Superwall.configure('pk_superwall_public_key');
 
-<DevelopmentBuildInstructions />
+      console.log('[Soulpad] Monetization SDKs successfully bound.');
+    } catch (error) {
+      console.error('[Soulpad Monetization Init Error]', error);
+    }
+  }
 
----
+  static async triggerPaywall(placementName: string): Promise<void> {
+    try {
+      // Direct integration with Superwall Paywall engine
+      await Superwall.shared.register(placementName);
+    } catch (error) {
+      console.error(`[Superwall] Trigger error for placement ${placementName}:`, error);
+    }
+  }
 
-## After you install the development build
+  static async checkProStatus(): Promise<boolean> {
+    try {
+      const customerInfo = await Purchases.getCustomerInfo();
+      return typeof customerInfo.entitlements.active['Soulpad Pass'] !== 'undefined';
+    } catch (e) {
+      return false;
+    }
+  }
+}
 
-Launch the development build from your device's Home screen and connect to a development server from the launcher screen to start working on your app. To learn how to use your new build, including the launcher screen, rebuilding, and debugging, see [Use a development build](/develop/development-builds/use-development-builds/). For common questions about development builds and Expo Go, including what you can't do in Expo Go and why, see the [FAQ](/develop/development-builds/faq/).
+import React from 'react';
+import { StyleSheet, View, ViewStyle } from 'react-native';
 
-### Expo Skills for AI agents
+interface GlassCardProps {
+  children: React.ReactNode;
+  style?: ViewStyle;
+}
 
-If you use an AI agent, install [Expo Skills](/skills/) to teach it the workflows on this page:
+export const GlassCard: React.FC<GlassCardProps> = ({ children, style }) => {
+  return (
+    <View style={[styles.glassCard, style]}>
+      {children}
+    </View>
+  );
+};
 
-<RelatedSkills names={['expo-dev-client', 'eas-simulator']} />
+const styles = StyleSheet.create({
+  glassCard: {
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    borderRadius: 24,
+    padding: 22,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
+    elevation: 8,
+  },
+});
+import React from 'react';
+import { Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import Animated, { ZoomIn } from 'react-native-reanimated';
+
+interface CouncilModalProps {
+  visible: boolean;
+  currentQuestionNumber: number;
+  offeredPearls: number;
+  onAccept: () => void;
+  onDecline: () => void;
+}
+
+export const CouncilModal: React.FC<CouncilModalProps> = ({
+  visible,
+  currentQuestionNumber,
+  offeredPearls,
+  onAccept,
+  onDecline,
+}) => {
+  return (
+    <Modal visible={visible} transparent animationType="fade">
+      <View style={styles.modalOverlay}>
+        <Animated.View entering={ZoomIn.duration(350)} style={styles.councilCard}>
+          <Text style={styles.councilTitle}>THE COUNCIL'S OFFER</Text>
+          <Text style={styles.councilDescription}>
+            You have reached Question {currentQuestionNumber}. The Council offers you guaranteed Pearls to walk away, or you can risk it all for higher ranks.
+          </Text>
+          
+          <Text style={styles.offerAmount}>{offeredPearls} PEARLS</Text>
+          
+          <TouchableOpacity activeOpacity={0.8} style={styles.acceptButton} onPress={onAccept}>
+            <Text style={styles.acceptButtonText}>ACCEPT & CASH OUT</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity activeOpacity={0.7} style={styles.declineButton} onPress={onDecline}>
+            <Text style={styles.declineButtonText}>REJECT & RISK IT ALL</Text>
+          </TouchableOpacity>
+        </Animated.View>
+      </View>
+    </Modal>
+  );
+};
+
+const styles = StyleSheet.create({
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(8, 10, 21, 0.88)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  councilCard: {
+    backgroundColor: '#11152E',
+    borderRadius: 28,
+    padding: 28,
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderColor: '#E6B800',
+    width: '100%',
+  },
+  councilTitle: {
+    color: '#E6B800',
+    fontSize: 20,
+    fontWeight: '900',
+    letterSpacing: 2,
+    marginBottom: 12,
+  },
+  councilDescription: {
+    color: 'rgba(255, 255, 255, 0.8)',
+    textAlign: 'center',
+    fontSize: 14,
+    lineHeight: 22,
+    marginBottom: 20,
+  },
+  offerAmount: {
+    color: '#FFFFFF',
+    fontSize: 34,
+    fontWeight: '900',
+    letterSpacing: 1,
+    marginBottom: 25,
+  },
+  acceptButton: {
+    backgroundColor: '#E6B800',
+    width: '100%',
+    paddingVertical: 16,
+    borderRadius: 14,
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  acceptButtonText: {
+    color: '#080A15',
+    fontWeight: '800',
+    fontSize: 14,
+    letterSpacing: 1,
+  },
+  declineButton: {
+    paddingVertical: 10,
+  },
+  declineButtonText: {
+    color: 'rgba(255, 255, 255, 0.5)',
+    fontWeight: '600',
+    fontSize: 13,
+  },
+});
+
+```
+### 8. Quiz Arena Core Screen (src/screens/QuizArenaScreen.tsx)
+```tsx
+import React, { useState, useEffect } from 'react';
+import {
+  StyleSheet,
+  Text,
+  View,
+  TouchableOpacity,
+  SafeAreaView,
+  StatusBar,
+  Alert,
+} from 'react-native';
+import LinearGradient from 'react-native-linear-gradient';
+import Animated, { FadeInUp, FadeInDown } from 'react-native-reanimated';
+
+import { Question, LifelineType, UserProfile } from '../types/game';
+import { GlassCard } from '../components/GlassCard';
+import { CouncilModal } from '../components/CouncilModal';
+import { AttioCRM } from '../services/AnalyticsAndCRM';
+import { MonetizationService } from '../services/MonetizationService';
+
+const LADDER_REWARDS = [100, 200, 300, 500, 1000, 2000, 4000, 8000, 16000, 32000, 64000, 125000, 250000, 500000, 1000000];
+
+const SAMPLE_QUESTION: Question = {
+  question_id: 'sp_q_5082',
+  category: 'Biblical History & Events',
+  difficulty_level: 5,
+  story_context: 'During the reign of King Hezekiah, Jerusalem faced an imminent siege by the Assyrian army under Sennacherib.',
+  prompt: 'Which strategic engineering project did Hezekiah undertake to secure the city\'s water supply prior to the siege?',
+  options: [
+    { id: 'A', text: 'Rebuilding the Eastern Water Gate' },
+    { id: 'B', text: 'Tunneling through solid rock from Gihon Spring to Siloam' },
+    { id: 'C', text: 'Constructing deep reservoirs in the Kidron Valley' },
+    { id: 'D', text: 'Diverting the Jordan River into northern cisterns' },
+  ],
+  correct_option_id: 'B',
+  scripture_proof: '2 Chronicles 32:30',
+  reasoning_explanation: 'Hezekiah blocked the upper outlet of the Gihon spring and channeled the water straight down to the west side of the City of David.',
+  lifeline_data: {
+    scriptural_hint: 'Focus on the underground channel leading directly to Siloam.',
+    fifty_fifty_remove: ['A', 'D'],
+  },
+};
+
+const MOCK_USER: UserProfile = {
+  id: 'usr_88392',
+  email: 'leader@ministry.org',
+  name: 'David Pastor',
+  isPro: false,
+  streakCount: 7,
+  pearlsBalance: 1200,
+};
+
+export const QuizArenaScreen: React.FC = () => {
+  const [questionIndex, setQuestionIndex] = useState<number>(4); // Index 4 = Question 5 Checkpoint
+  const [disabledOptions, setDisabledOptions] = useState<string[]>([]);
+  const [usedLifelines, setUsedLifelines] = useState<Record<LifelineType, boolean>>({
+    scriptural_hint: false,
+    fifty_fifty: false,
+    verse_swap: false,
+    community_wisdom: false,
+  });
+  const [showCouncilModal, setShowCouncilModal] = useState<boolean>(false);
+  const [activeHint, setActiveHint] = useState<string | null>(null);
+
+  useEffect(() => {
+    // Sync active session start to Attio CRM
+    AttioCRM.syncUserToAttio(MOCK_USER, 'ASCENT_RUN_STARTED', { levelIndex: questionIndex });
+
+    // Check for Council Offer Trigger
+    if (questionIndex === 4 || questionIndex === 9) {
+      setShowCouncilModal(true);
+    }
+  }, [questionIndex]);
+
+  const handleAnswerSelection = async (selectedId: string) => {
+    if (selectedId === SAMPLE_QUESTION.correct_option_id) {
+      if (questionIndex < LADDER_REWARDS.length - 1) {
+        setQuestionIndex(prev => prev + 1);
+        setDisabledOptions([]);
+        setActiveHint(null);
+      } else {
+        Alert.alert('Ascent Master!', 'You reached the peak of wisdom!');
+      }
+    } else {
+      // Track loss event in Attio CRM & Trigger Superwall Paywall for Second Chance
+      await AttioCRM.syncUserToAttio(MOCK_USER, 'ASCENT_RUN_FAILED', { failedAtQuestion: questionIndex + 1 });
+      await MonetizationService.triggerPaywall('second_chance_revive');
+      
+      Alert.alert('Ascent Ended', `Proof: ${SAMPLE_QUESTION.scripture_proof}. ${SAMPLE_QUESTION.reasoning_explanation}`);
+    }
+  };
+
+  const executeFiftyFifty = () => {
+    if (usedLifelines.fifty_fifty) return;
+    setDisabledOptions(SAMPLE_QUESTION.lifeline_data.fifty_fifty_remove);
+    setUsedLifelines(prev => ({ ...prev, fifty_fifty: true }));
+  };
+
+  const executeHint = () => {
+    if (usedLifelines.scriptural_hint) return;
+    setActiveHint(SAMPLE_QUESTION.lifeline_data.scriptural_hint);
+    setUsedLifelines(prev => ({ ...prev, scriptural_hint: true }));
+  };
+
+  const handleAcceptCouncilOffer = async () => {
+    setShowCouncilModal(false);
+    const guaranteedPearls = LADDER_REWARDS[questionIndex - 1] || 500;
+    
+    await AttioCRM.syncUserToAttio(MOCK_USER, 'COUNCIL_OFFER_ACCEPTED', { cashedOutPearls: guaranteedPearls });
+    Alert.alert('Banker Offer Accepted', `You cashed out with ${guaranteedPearls} Pearls!`);
+  };
+
+  return (
+    <LinearGradient colors={['#080A15', '#161B3D', '#080A15']} style={styles.container}>
+      <StatusBar barStyle="light-content" />
+      <SafeAreaView style={styles.safeArea}>
+        
+        {/* HUD Navigation Header */}
+        <View style={styles.headerContainer}>
+          <View style={styles.badgeContainer}>
+            <Text style={styles.badgeText}>CHERUBIM LEAGUE</Text>
+          </View>
+          <View style={styles.rewardContainer}>
+            <Text style={styles.rewardLabel}>QUESTION {questionIndex + 1} VALUE</Text>
+            <Text style={styles.rewardValue}>{LADDER_REWARDS[questionIndex]} Pearls</Text>
+          </View>
+        </View>
+
+        {/* Dynamic Lifelines Action Bar */}
+        <View style={styles.lifelinesContainer}>
+          <TouchableOpacity 
+            style={[styles.lifelineButton, usedLifelines.fifty_fifty && styles.lifelineDisabled]} 
+            onPress={executeFiftyFifty}
+            disabled={usedLifelines.fifty_fifty}>
+            <Text style={styles.lifelineText}>50:50</Text>
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={[styles.lifelineButton, usedLifelines.scriptural_hint && styles.lifelineDisabled]} 
+            onPress={executeHint}
+            disabled={usedLifelines.scriptural_hint}>
+            <Text style={styles.lifelineText}>Verse Hint</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Central Scenario Glass Container */}
+        <Animated.View entering={FadeInUp.duration(500)}>
+          <GlassCard>
+            <Text style={styles.categoryText}>{SAMPLE_QUESTION.category.toUpperCase()}</Text>
+            {SAMPLE_QUESTION.story_context && (
+              <Text style={styles.storyText}>{SAMPLE_QUESTION.story_context}</Text>
+            )}
+            <Text style={styles.promptText}>{SAMPLE_QUESTION.prompt}</Text>
+            
+            {activeHint && (
+              <View style={styles.hintContainer}>
+                <Text style={styles.hintText}>📖 {activeHint}</Text>
+              </View>
+            )}
+          </GlassCard>
+        </Animated.View>
+
+        {/* Multiple Choice Selection Grid */}
+        <View style={styles.optionsContainer}>
+          {SAMPLE_QUESTION.options.map((option, idx) => {
+            const isDisabled = disabledOptions.includes(option.id);
+            return (
+              <Animated.View key={option.id} entering={FadeInDown.delay(idx * 80)}>
+                <TouchableOpacity
+                  activeOpacity={0.8}
+                  disabled={isDisabled}
+                  style={[styles.optionButton, isDisabled && styles.optionDisabled]}
+                  onPress={() => handleAnswerSelection(option.id)}>
+                  <Text style={styles.optionPrefix}>{option.id}</Text>
+                  <Text style={styles.optionText}>{option.text}</Text>
+                </TouchableOpacity>
+              </Animated.View>
+            );
+          })}
+        </View>
+
+        {/* High-Stakes Banker Modal Component */}
+        <CouncilModal
+          visible={showCouncilModal}
+          currentQuestionNumber={questionIndex + 1}
+          offeredPearls={LADDER_REWARDS[questionIndex - 1] || 500}
+          onAccept={handleAcceptCouncilOffer}
+          onDecline={() => setShowCouncilModal(false)}
+        />
+
+      </SafeAreaView>
+    </LinearGradient>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
+  safeArea: {
+    flex: 1,
+    marginHorizontal: 18,
+    justifyContent: 'space-between',
+  },
+  headerContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  badgeContainer: {
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.12)',
+  },
+  badgeText: {
+    color: '#E6B800',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1,
+  },
+  rewardContainer: {
+    alignItems: 'flex-end',
+  },
+  rewardLabel: {
+    color: 'rgba(255, 255, 255, 0.4)',
+    fontSize: 9,
+    fontWeight: '700',
+  },
+  rewardValue: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  lifelinesContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 12,
+    marginVertical: 10,
+  },
+  lifelineButton: {
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    borderWidth: 1,
+    borderColor: '#E6B800',
+    paddingHorizontal: 18,
+    paddingVertical: 8,
+    borderRadius: 12,
+  },
+  lifelineDisabled: {
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    opacity: 0.25,
+  },
+  lifelineText: {
+    color: '#E6B800',
+    fontWeight: '700',
+    fontSize: 12,
+  },
+  categoryText: {
+    color: '#E6B800',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1.5,
+    marginBottom: 6,
+  },
+  storyText: {
+    color: 'rgba(255, 255, 255, 0.65)',
+    fontSize: 13,
+    lineHeight: 19,
+    marginBottom: 10,
+    fontStyle: 'italic',
+  },
+  promptText: {
+    color: '#FFFFFF',
+    fontSize: 17,
+    fontWeight: '600',
+    lineHeight: 24,
+  },
+  hintContainer: {
+    marginTop: 12,
+    padding: 10,
+    backgroundColor: 'rgba(230, 184, 0, 0.08)',
+    borderRadius: 8,
+    borderLeftWidth: 3,
+    borderLeftColor: '#E6B800',
+  },
+  hintText: {
+    color: '#E6B800',
+    fontSize: 12,
+  },
+  optionsContainer: {
+    gap: 10,
+    marginBottom: 16,
+  },
+  optionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  optionDisabled: {
+    opacity: 0.2,
+  },
+  optionPrefix: {
+    color: '#E6B800',
+    fontWeight: '800',
+    fontSize: 15,
+    marginRight: 12,
+  },
+  optionText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '500',
+    flex: 1,
+  },
+});
+import React, { useEffect } from 'react';
+import { QuizArenaScreen } from './src/screens/QuizArenaScreen';
+import { MonetizationService } from './src/services/MonetizationService';
+
+const App = () => {
+  useEffect(() => {
+    // Boot monetization services on launch
+    MonetizationService.initialize('usr_88392');
+  }, []);
+
+  return <QuizArenaScreen />;
+};
+
+export default App;
+
+```
+### How to Run and Test
+ 1. **Install Dependencies:** Run npm install in your project root directory.
+ 2. **iOS Setup:** Run cd ios && pod install && cd .. then execute npm run ios.
+ 3. **Android Setup:** Ensure your Android emulator is active and execute npm run android.
