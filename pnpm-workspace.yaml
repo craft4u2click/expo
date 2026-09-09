@@ -7,15 +7,19 @@ packages:
   - apps/bare-expo/e2e/image-comparison
   - packages/expo-sqlite/dev-plugin-webui
 
-ignoreWorkspaceCycles: true
-verifyDepsBeforeRun: warn
-linkWorkspacePackages: deep
-preferWorkspacePackages: true
-resolvePeersFromWorkspaceRoot: true
-dedupePeerDependents: true
-strictDepBuilds: true
+allowBuilds:
+  '@parcel/watcher': false
+  '@shopify/react-native-skia': true
+  '@swc/core': true
+  esbuild: true
+  sharp: true
+  unrs-resolver: false
+  workerd: true
 blockExoticSubdeps: true
-shellEmulator: true
+dedupePeerDependents: true
+
+ignoreWorkspaceCycles: true
+linkWorkspacePackages: deep
 
 loglevel: info
 
@@ -35,18 +39,9 @@ overrides:
   '@types/babel__generator': ^7.27.0
   '@types/babel__template': ^7.4.4
   '@types/babel__traverse': ^7.20.7
-  react-native: 0.87.1
+  react-native: 0.88.0-rc.0
   react-native-reanimated: 4.5.1
   react-native-worklets: 0.10.1
-
-patchedDependencies:
-  '@react-native-community/netinfo': patches/@react-native-community+netinfo.patch
-  '@shopify/react-native-skia@2.6.2': patches/@shopify__react-native-skia@2.6.2.patch
-  react-native-reanimated: patches/react-native-reanimated.patch
-  react-native-safe-area-context@5.7.0: patches/react-native-safe-area-context@5.7.0.patch
-  react-native-view-shot: patches/react-native-view-shot.patch
-  react-native-worklets: patches/react-native-worklets.patch
-  react-server-dom-webpack: patches/react-server-dom-webpack.patch
 
 packageExtensions:
   # NOTE(@kitten): `debug` has an optional peer on `supports-color`. However, depending on
@@ -56,11 +51,16 @@ packageExtensions:
     dependencies:
       supports-color: ^8.1.1
 
-allowBuilds:
-  '@parcel/watcher': false
-  '@shopify/react-native-skia': true
-  '@swc/core': true
-  esbuild: true
-  sharp: true
-  unrs-resolver: false
-  workerd: true
+patchedDependencies:
+  '@react-native-community/netinfo': patches/@react-native-community+netinfo.patch
+  '@shopify/react-native-skia@2.6.2': patches/@shopify__react-native-skia@2.6.2.patch
+  react-native-reanimated: patches/react-native-reanimated.patch
+  react-native-safe-area-context@5.7.0: patches/react-native-safe-area-context@5.7.0.patch
+  react-native-view-shot: patches/react-native-view-shot.patch
+  react-native-worklets: patches/react-native-worklets.patch
+  react-server-dom-webpack: patches/react-server-dom-webpack.patch
+preferWorkspacePackages: true
+resolvePeersFromWorkspaceRoot: true
+shellEmulator: true
+strictDepBuilds: true
+verifyDepsBeforeRun: warn
